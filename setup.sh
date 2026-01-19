@@ -5,7 +5,7 @@ set -eu
 ##### SET THESE VARIABLES #####
 
 usbstick="/usbstick.bin"
-mountpoint="/mnt/usbstick"
+mountpoint="/data"
 size=16G
 
 ###############################
@@ -14,15 +14,16 @@ main() {
 	validate
 	overlay
 	make_usbstick
-	load_module
 }
 
 overlay() {
 	# Set up dwc2 USB controller overlay (used to enable USB OTG/USB device)
-	grep -q dwc2 /boot/firmware/config.txt || {
+	grep -qE '^dtoverlay=dwc2$' /boot/firmware/config.txt || {
 		echo "dtoverlay=dwc2" | tee -a /boot/firmware/config.txt
 	}
-	echo "dwc2" | tee /etc/modules-load.d/mass-storage
+	[ -f /etc/modules-load.d/dwc2.conf ] || {
+		echo "dwc2" | tee /etc/modules-load.d/dwc2.conf
+	}
 	ok "USB controller overlay done"
 }
 
@@ -33,26 +34,20 @@ make_usbstick() {
 		mkdosfs "${usbstick}" -F 32 --mbr=yes -n PIMASSS
 	}
 	# Create the mountpoint
-	[ -d "${mountpoint}" ] && {
+	[ -d "${mountpoint}" ] || {
 		mkdir -pv "${mountpoint}"
 		chmod -v +w "${mountpoint}"
 	}
 	# Add mount to fstab
 	grep -q "${usbstick}" /etc/fstab || {
 		echo "${usbstick} ${mountpoint} vfat rw,users,user,exec,umask=000 0 0" | tee -a /etc/fstab
+		systemctl daemon-reload
 	}
 	# Mount filesystem
 	mountpoint -q "${mountpoint}" || {
 		mount "${mountpoint}"
 	}
 	ok "USB stick (size=${size}) created and mounted"
-}
-
-load_module() {
-	lsmod | grep -q g_mass_storage || {
-		modprobe g_mass_storage file="${usbstick}" stall=0 ro=0
-	}
-	ok "module loaded"
 }
 
 validate() {
